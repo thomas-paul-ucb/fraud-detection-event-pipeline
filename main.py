@@ -14,3 +14,20 @@ class Transaction(BaseModel):
 
 # 2. Initialize FastAPI
 app = FastAPI(title="Fraud Detection Ingestion API")
+
+
+@app.post("/ingest")
+async def ingest_transaction(tx: Transaction):
+    # For now, we simulate success. 
+    # Logic for Kafka will go here in the next phase.
+    
+    # We add a server-side timestamp if one wasn't provided
+    if not tx.timestamp:
+        tx.timestamp = datetime.utcnow()
+        
+    print(f"Received transaction: {tx.transaction_id} from {tx.user_id}")
+    
+    return {
+        "status": "accepted", 
+        "message": f"Transaction {tx.transaction_id} queued for processing"
+    }
