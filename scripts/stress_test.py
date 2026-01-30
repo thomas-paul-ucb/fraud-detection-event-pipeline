@@ -3,7 +3,7 @@ import uuid
 import random
 import time
 
-API_URL = "http://localhost:8000/ingest"
+API_URL = "http://localhost:8000/api/v1/ingest"
 
 def generate_transaction():
     return {
