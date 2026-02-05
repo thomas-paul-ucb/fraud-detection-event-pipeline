@@ -1,26 +1,31 @@
 import requests
-import uuid
-import random
 import time
+import uuid
 
+# Use localhost to match your working version
 API_URL = "http://localhost:8000/api/v1/ingest"
 
-def generate_transaction():
-    return {
-        "transaction_id": str(uuid.uuid4()),
-        "user_id": f"user_{random.randint(100, 999)}",
-        "amount": round(random.uniform(5.0, 500.0), 2),
-        "merchant": random.choice(["Amazon", "Uber", "Starbucks", "Target"]),
-        "currency": "USD"
-    }
-
-def run_test(count=10):
-    print(f"🚀 Starting stress test: sending {count} transactions...")
-    for i in range(count):
-        data = generate_transaction()
-        response = requests.post(API_URL, json=data)
-        print(f"Sent {i+1}/{count}: {response.status_code}")
-        time.sleep(0.1) # A small delay so we can see it happening
+def run_velocity_attack():
+    # We use a single ID to force an alert
+    target_user = "user_99_ATTACKER"
+    print(f"🔥 Starting velocity attack on {target_user}...")
+    
+    for i in range(15):
+        payload = {
+            "transaction_id": str(uuid.uuid4()),
+            "user_id": target_user,
+            "amount": 100.00,
+            "currency": "USD",
+            "merchant": "Amazon"  
+        }
+        try:
+            resp = requests.post(API_URL, json=payload)
+            # This print will tell us immediately if it's fixed (look for 200)
+            print(f"Sent tx {i+1}: Status {resp.status_code}")
+        except Exception as e:
+            print(f"Error: {e}")
+        
+        time.sleep(0.1) 
 
 if __name__ == "__main__":
-    run_test(50)
+    run_velocity_attack()

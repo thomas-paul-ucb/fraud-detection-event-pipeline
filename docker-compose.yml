@@ -28,3 +28,8 @@ services:
       KAFKA_CLUSTERS_0_NAME: local
       # Note: We use 'kafka:29092' here because the UI is INSIDE the docker network
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+
+  redis:
+    image: redis:7.2-alpine
+    ports:
+      - "6379:6379"
