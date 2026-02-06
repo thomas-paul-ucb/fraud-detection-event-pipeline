@@ -19,6 +19,7 @@ class FraudDetector:
             bootstrap_servers=self.kafka_server,
             group_id="fraud-detector-group",
             auto_offset_reset='earliest',
+            # This handles the JSON conversion automatically for every message
             value_deserializer=lambda v: json.loads(v.decode('utf-8'))
         )
         await self.consumer.start()
@@ -26,22 +27,27 @@ class FraudDetector:
 
         try:
             async for msg in self.consumer:
+                # msg.value is already a dict thanks to the value_deserializer above
                 tx = msg.value
                 user_id = tx['user_id']
+                amount = tx['amount']
                 
-                # DESIGN CONCEPT: Rate Limiting / Velocity Check
-                # We use a Redis key for each user
+                # --- RULE 1: Block-list Check ---
+                # SISMEMBER checks if the user_id exists in our 'banned_users' set
+                is_banned = await self.r.sismember("banned_users", user_id)
+                if is_banned:
+                    print(f"🚫 BLOCK-LIST ALERT: Banned user {user_id} attempted a transaction!")
+                    continue  # Stop processing this transaction if they are banned
+
+                # --- RULE 2: Velocity Check ---
                 key = f"user_velocity:{user_id}"
-                
-                # Increment count
                 count = await self.r.incr(key)
                 
-                # If first time seeing this user in this window, set expiry (60s)
                 if count == 1:
                     await self.r.expire(key, 60)
                 
                 if count > 5:
-                    print(f"🚨 ALERT: High Velocity detected for User {user_id}! ({count} tx/min)")
+                    print(f"🚨 VELOCITY ALERT: High Velocity for User {user_id}! ({count} tx/min)")
                 else:
                     print(f"✅ Transaction processed for {user_id}. Count: {count}")
                     
