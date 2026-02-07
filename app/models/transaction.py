@@ -1,4 +1,3 @@
-# app/models/transaction.py
 from pydantic import BaseModel, Field
 from datetime import datetime
 from typing import Optional
@@ -11,3 +10,6 @@ class Transaction(BaseModel):
     merchant: str
     currency: str = "USD"
     timestamp: Optional[datetime] = None
+    # Add these two for the Geographic Impossibility rule
+    lat: Optional[float] = None
+    lon: Optional[float] = None

@@ -2,6 +2,7 @@ import asyncio
 import json
 from aiokafka import AIOKafkaConsumer
 import redis.asyncio as redis
+from datetime import datetime
 
 class FraudDetector:
     def __init__(self):
@@ -26,35 +27,54 @@ class FraudDetector:
                 tx = msg.value
                 user_id = tx['user_id']
                 amount = float(tx['amount'])
+                new_lat = tx.get('lat')
+                new_lon = tx.get('lon')
                 
-                # --- RULE 1: Block-list Check ---
-                is_banned = await self.r.sismember("banned_users", user_id)
-                if is_banned:
-                    print(f"🚫 BLOCK-LIST ALERT: Banned user {user_id} attempted a transaction!")
+                # --- RULE 1: Block-list Check (Sets) ---
+                if await self.r.sismember("banned_users", user_id):
+                    print(f"🚫 BLOCK-LIST ALERT: Banned user {user_id}!")
                     continue
 
-                # --- RULE 2: Spending Spike Check (New!) ---
+                # --- RULE 2: Geographic Impossibility (Geo/Hashes) ---
+                if new_lat is not None and new_lon is not None:
+                    geo_key = "global_user_locations"
+                    state_key = f"user_state:{user_id}"
+                    
+                    prev_state = await self.r.hgetall(state_key)
+                    
+                    if prev_state:
+                        # 1. Update the "old" marker to where the user WAS
+                        await self.r.geoadd(geo_key, (float(prev_state['lon']), float(prev_state['lat']), f"{user_id}_old"))
+                        # 2. Add the "new" marker to where the user IS NOW
+                        await self.r.geoadd(geo_key, (new_lon, new_lat, user_id))
+                        
+                        # 3. Calculate distance
+                        dist = await self.r.geodist(geo_key, f"{user_id}_old", user_id, unit="km")
+                        
+                        if dist:
+                            print(f"DEBUG: Distance calculated: {float(dist):.2f} km")
+                            if float(dist) > 500:
+                                print(f"🌍 TRAVEL ALERT: User {user_id} moved {float(dist):.2f}km instantly!")
+
+                    # Update the state hash for the next comparison
+                    await self.r.hset(state_key, mapping={"lat": new_lat, "lon": new_lon})
+
+                # --- RULE 3: Spending Spike Check (Lists) ---
                 history_key = f"user_history:{user_id}"
-                # Get the last 5 transaction amounts
                 history = await self.r.lrange(history_key, 0, 4)
-                
                 if history:
                     avg_spend = sum(float(x) for x in history) / len(history)
-                    if amount > avg_spend * 5 and len(history) >= 3: # Min 3 tx to have a valid avg
+                    if amount > avg_spend * 5 and len(history) >= 3:
                         print(f"💰 SPIKE ALERT: User {user_id} spent ${amount} (Avg: ${avg_spend:.2f})")
-
-                # Store this transaction in the history list
                 await self.r.lpush(history_key, amount)
-                # Keep only the last 10 transactions to save memory
                 await self.r.ltrim(history_key, 0, 9)
 
-                # --- RULE 3: Velocity Check ---
-                key = f"user_velocity:{user_id}"
-                count = await self.r.incr(key)
-                if count == 1: await self.r.expire(key, 60)
-                
+                # --- RULE 4: Velocity Check (Strings/Counters) ---
+                v_key = f"user_velocity:{user_id}"
+                count = await self.r.incr(v_key)
+                if count == 1: await self.r.expire(v_key, 60)
                 if count > 5:
-                    print(f"🚨 VELOCITY ALERT: High Velocity for User {user_id}! ({count} tx/min)")
+                    print(f"🚨 VELOCITY ALERT: User {user_id} ({count} tx/min)")
                 else:
                     print(f"✅ Transaction processed for {user_id}. Count: {count}")
                     
