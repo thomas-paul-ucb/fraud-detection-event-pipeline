@@ -3,6 +3,8 @@ services:
     image: confluentinc/cp-zookeeper:7.5.0
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
+    networks:
+      - fraud-network
 
   kafka:
     image: confluentinc/cp-kafka:7.5.0
@@ -13,10 +15,12 @@ services:
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://127.0.0.1:9092,PLAINTEXT_INTERNAL://kafka:29092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
-      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    networks:
+      - fraud-network
 
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
@@ -26,10 +30,67 @@ services:
       - "8080:8080"
     environment:
       KAFKA_CLUSTERS_0_NAME: local
-      # Note: We use 'kafka:29092' here because the UI is INSIDE the docker network
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+    networks:
+      - fraud-network
 
   redis:
     image: redis:7.2-alpine
     ports:
       - "6379:6379"
+    networks:
+      - fraud-network
+
+  prometheus:
+    image: prom/prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    networks:
+      - fraud-network
+
+  grafana:
+    image: grafana/grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    networks:
+      - fraud-network
+
+  api:
+    build: 
+      context: .
+      dockerfile: Dockerfile.api
+    environment:
+      - KAFKA_URL=kafka:29092
+      - REDIS_HOST=redis
+    depends_on:
+      - kafka
+      - redis
+    ports:
+      - "8000:8000"
+    networks:
+      - fraud-network
+    restart: on-failure
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    environment:
+      - KAFKA_URL=kafka:29092
+      - REDIS_HOST=redis
+    depends_on:
+      - kafka
+      - redis
+    ports:
+      - "8001:8001"
+    networks:
+      - fraud-network
+    restart: on-failure
+
+networks:
+  fraud-network:
+    driver: bridge

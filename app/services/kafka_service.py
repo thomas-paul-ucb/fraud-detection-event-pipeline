@@ -1,4 +1,5 @@
 # app/services/kafka_service.py
+import os
 from aiokafka import AIOKafkaProducer
 import json
 import asyncio
@@ -6,7 +7,7 @@ import asyncio
 class KafkaService:
     def __init__(self):
         self.producer = None
-        self.server = "127.0.0.1:9092"
+        self.server = os.getenv("KAFKA_URL", "127.0.0.1:9092")
         self.topic = "pending-transactions"
 
     async def start(self):

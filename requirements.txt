@@ -4,3 +4,5 @@ aiokafka
 redis
 pydantic
 requests
+prometheus_client
+prometheus-fastapi-instrumentator

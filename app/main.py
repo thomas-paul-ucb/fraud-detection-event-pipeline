@@ -3,6 +3,7 @@ from fastapi import FastAPI
 from contextlib import asynccontextmanager
 from app.api.v1.ingestion import router as ingestion_router
 from app.services.kafka_service import kafka_service
+from prometheus_fastapi_instrumentator import Instrumentator
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -13,6 +14,7 @@ async def lifespan(app: FastAPI):
     await kafka_service.stop()
 
 app = FastAPI(title="Fraud Detection Ingestion API", lifespan=lifespan)
+Instrumentator().instrument(app).expose(app)
 
 app.include_router(ingestion_router, prefix="/api/v1", tags=["Ingestion"])
 

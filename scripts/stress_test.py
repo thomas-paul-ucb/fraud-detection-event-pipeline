@@ -1,33 +1,33 @@
 import requests
-import uuid
 import time
+import random
+from datetime import datetime
 
+# Updated to match your Swagger screenshot path
 API_URL = "http://localhost:8000/api/v1/ingest"
 
-def test_traveler():
-    user = "globetrotter_7"
+def run_stress_test(count=50):
+    print(f"🔥 Starting stress test: Sending {count} transactions to {API_URL}")
     
-    # 1. Transaction in New York
-    print("Sending NY transaction...")
-    requests.post(API_URL, json={
-        "transaction_id": str(uuid.uuid4()),
-        "user_id": user,
-        "amount": 50.0,
-        "merchant": "NY_Cafe",
-        "lat": 40.7128, "lon": -74.0060  # New York
-    })
-    
-    time.sleep(1) # Wait a second
-    
-    # 2. Transaction in London
-    print("Sending London transaction...")
-    requests.post(API_URL, json={
-        "transaction_id": str(uuid.uuid4()),
-        "user_id": user,
-        "amount": 100.0,
-        "merchant": "London_Pub",
-        "lat": 51.5074, "lon": -0.1278  # London (~5,500 km away!)
-    })
+    for i in range(count):
+        payload = {
+            "transaction_id": f"tx_{random.randint(1000, 9999)}",
+            "user_id": f"user_{random.randint(1, 50)}",
+            "amount": random.uniform(10.0, 6000.0), # High amounts to trigger fraud logic
+            "merchant": random.choice(["Amazon", "Apple Store", "Steam", "Unknown_Shop"]),
+            "currency": "USD",
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "lat": 40.7128,
+            "lon": -74.0060
+        }
+        
+        try:
+            response = requests.post(API_URL, json=payload)
+            print(f"[{i}] Sent! Status: {response.status_code}")
+        except Exception as e:
+            print(f"❌ Error: {e}")
+        
+        time.sleep(0.5) # Half-second delay between hits
 
 if __name__ == "__main__":
-    test_traveler()
+    run_stress_test()
