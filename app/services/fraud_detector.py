@@ -7,7 +7,11 @@ from datetime import datetime
 from prometheus_client import start_http_server, Counter
 
 # Define Metrics
-FRAUD_ALERTS = Counter('fraud_alerts_total', 'Total fraud alerts triggered', ['type'])
+FRAUD_ALERTS = Counter(
+    'fraud_alerts_total', 
+    'Total fraud alerts', 
+    ['user_id', 'type']
+)
 TX_PROCESSED = Counter('transactions_processed_total', 'Total transactions checked')
 
 class FraudDetector:
@@ -34,14 +38,14 @@ class FraudDetector:
             async for msg in self.consumer:
                 TX_PROCESSED.inc() # Count every message seen
                 tx = msg.value
-                user_id = tx['user_id']
+                user_id = tx.get('user_id', 'unknown_user')
                 amount = float(tx['amount'])
                 new_lat = tx.get('lat')
                 new_lon = tx.get('lon')
                 
                 # --- RULE 1: Block-list Check ---
                 if await self.r.sismember("banned_users", user_id):
-                    FRAUD_ALERTS.labels(type='block_list').inc()
+                    FRAUD_ALERTS.labels(user_id=str(user_id), type='block_list').inc()
                     print(f"🚫 BLOCK-LIST ALERT: Banned user {user_id}!")
                     continue
 
@@ -57,7 +61,7 @@ class FraudDetector:
                         dist = await self.r.geodist(geo_key, f"{user_id}_old", user_id, unit="km")
                         
                         if dist and float(dist) > 500:
-                            FRAUD_ALERTS.labels(type='travel_impossibility').inc()
+                            FRAUD_ALERTS.labels(user_id=str(user_id), type='travel_impossibility').inc()
                             print(f"🌍 TRAVEL ALERT: User {user_id} moved {float(dist):.2f}km!")
 
                     await self.r.hset(state_key, mapping={"lat": new_lat, "lon": new_lon})
@@ -68,7 +72,7 @@ class FraudDetector:
                 if history:
                     avg_spend = sum(float(x) for x in history) / len(history)
                     if amount > avg_spend * 5 and len(history) >= 3:
-                        FRAUD_ALERTS.labels(type='spending_spike').inc()
+                        FRAUD_ALERTS.labels(user_id=str(user_id), type='spending_spike').inc()
                         print(f"💰 SPIKE ALERT: User {user_id} spent ${amount} (Avg: ${avg_spend:.2f})")
                 await self.r.lpush(history_key, amount)
                 await self.r.ltrim(history_key, 0, 9)
@@ -78,7 +82,7 @@ class FraudDetector:
                 count = await self.r.incr(v_key)
                 if count == 1: await self.r.expire(v_key, 60)
                 if count > 5:
-                    FRAUD_ALERTS.labels(type='velocity').inc()
+                    FRAUD_ALERTS.labels(user_id=str(user_id), type='velocity').inc()
                     print(f"🚨 VELOCITY ALERT: User {user_id} ({count} tx/min)")
                 else:
                     print(f"✅ Transaction processed for {user_id}. Count: {count}")
