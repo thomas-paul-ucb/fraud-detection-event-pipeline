@@ -4,7 +4,7 @@ import random
 from datetime import datetime
 
 # Matches your fixed endpoint
-API_URL = "http://localhost:8000/api/v1/ingest"
+API_URL = "http://127.0.0.1:8000/api/v1/ingest"
 
 def run_stress_test(count=20):
     # We use a specific ID to ensure the 'velocity' logic triggers
