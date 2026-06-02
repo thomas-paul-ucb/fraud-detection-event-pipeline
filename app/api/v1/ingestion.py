@@ -18,9 +18,7 @@ async def ingest_transaction(tx: Transaction):
         tx_data['timestamp'] = tx_data['timestamp'].isoformat() # Date must be string for JSON
         
         # PUSH TO KAFKA
-        print(f"DEBUG: Attempting to send {tx.transaction_id} to Kafka...") # ADD THIS
         await kafka_service.send_transaction(tx_data)
-        print(f"DEBUG: Successfully sent {tx.transaction_id}!") # ADD THIS
 
         return {"status": "accepted", "tx_id": tx.transaction_id}
     except Exception as e:
