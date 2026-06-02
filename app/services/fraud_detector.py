@@ -4,6 +4,7 @@ import json
 from aiokafka import AIOKafkaConsumer
 import redis.asyncio as redis
 from datetime import datetime
+import time
 from prometheus_client import start_http_server, Counter
 
 # Define Metrics
@@ -79,13 +80,23 @@ class FraudDetector:
 
                 # --- RULE 4: Velocity Check ---
                 v_key = f"user_velocity:{user_id}"
-                count = await self.r.incr(v_key)
-                if count == 1: await self.r.expire(v_key, 60)
-                if count > 5:
+                now = time.time()
+                window = 60  # 60-second sliding window
+                threshold = 5
+
+                pipe = self.r.pipeline()
+                await pipe.zremrangebyscore(v_key, 0, now - window)  # remove old entries
+                await pipe.zadd(v_key, {str(now): now})               # add current tx
+                await pipe.zcard(v_key)                               # count in window
+                await pipe.expire(v_key, window)
+                results = await pipe.execute()
+                count = results[2]
+
+                if count > threshold:
                     FRAUD_ALERTS.labels(user_id=str(user_id), type='velocity').inc()
-                    print(f"🚨 VELOCITY ALERT: User {user_id} ({count} tx/min)")
+                    print(f"🚨 VELOCITY ALERT: User {user_id} ({count} tx in last 60s)")
                 else:
-                    print(f"✅ Transaction processed for {user_id}. Count: {count}")
+                    print(f"✅ Transaction processed for {user_id}. Count in window: {count}")
                     
         finally:
             await self.consumer.stop()
