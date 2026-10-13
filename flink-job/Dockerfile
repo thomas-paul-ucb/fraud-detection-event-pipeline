@@ -8,5 +8,6 @@ RUN mvn -q package -DskipTests
 
 # Stage 2: run it on the official Flink image
 FROM flink:1.20.1-java17
-RUN mkdir -p /opt/flink/usrlib
+RUN mkdir -p /opt/flink/usrlib /opt/flink/checkpoints \
+    && chown -R flink:flink /opt/flink/checkpoints
 COPY --from=build /build/target/fraud-flink-job-1.0.0.jar /opt/flink/usrlib/fraud-flink-job.jar
