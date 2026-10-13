@@ -12,36 +12,33 @@ A distributed, event-driven system that ingests financial transactions at high t
                                             │ HTTP POST /api/v1/ingest
                                             ▼
                                       ┌──────────┐
-                                      │  FastAPI  │
-                                      └─────┬─────┘
+                                      │ FastAPI  │
+                                      └─────┬────┘
                                             │ produce
                                             ▼
                                       ┌──────────┐
                                       │  Kafka   │  pending-transactions
-                                      └─────┬─────┘
-                                            │ consume
-                                            ▼
-                              ┌─────────────────────────┐
-                              │     Fraud Worker         │
-                              │  (Python / aiokafka)     │
-                              └────────────┬────────────┘
-                                           │ read state + thresholds
-                                           │ write alerts + counters
-                                           ▼
-                                      ┌──────────┐
-                              ┌──────▶│  Redis   │◀──────┐
-                              │       └──────────┘       │
-                              │                          │
-                    read alert metrics             write accepted
-                              │                     thresholds
-                              │                          │
-                    ┌─────────┴──────────────────────────┴──────────┐
-                    │          Threshold Tuner Agent                  │
-                    │   Claude claude-opus-4-8 + tool use + CLI      │
-                    └────────────────────────────────────────────────┘
-                              │
-                        Hot reload: worker reads fraud:thresholds
-                        on every message — no restart needed
+                                      └─────┬────┘
+                        ┌───────────────────┴───────────────────┐
+                        │ group: fraud-detector-group           │ group: flink-fraud-detector
+                        ▼                                       ▼
+          ┌─────────────────────────┐          ┌───────────────────────────────┐
+          │      Fraud Worker       │          │    Flink Stream Processor     │
+          │   (Python / aiokafka)   │          │    (Java DataStream API)      │
+          └────────────┬────────────┘          │  keyed state · event-time     │
+                       │                       │  sliding windows · checkpoints│
+                       ▼                       └───────────────┬───────────────┘
+                  ┌──────────┐                                 │ produce
+          ┌──────▶│  Redis   │◀──────┐                         ▼
+          │       └──────────┘       │                   ┌──────────┐
+          │                          │                   │  Kafka   │  fraud-alerts
+  read alert metrics          write accepted             └──────────┘
+          │                    thresholds
+          │                          │
+   ┌──────┴──────────────────────────┴──────┐
+   │         Threshold Tuner Agent          │
+   │  Claude claude-opus-4-8 + tool use     │
+   └────────────────────────────────────────┘
 ```
 
 ## Fraud Rules
@@ -54,6 +51,28 @@ All thresholds are stored in the Redis hash `fraud:thresholds` and read per-mess
 | Geographic impossibility | Distance between consecutive transactions | 500 km |
 | Spending spike | Transaction vs. rolling average of last 5 | 5× average |
 | Velocity | Transactions in a 60-second sliding window | 5 tx / 60 s |
+
+## Stream Processing with Apache Flink
+
+A Java Flink job (`flink-job/`) consumes the same `pending-transactions` topic as the Python worker, using its own consumer group, and publishes alerts to a `fraud-alerts` topic.
+
+| Rule | Flink implementation | Threshold |
+|---|---|---|
+| Velocity | `keyBy(user_id)` → 60s sliding event-time windows (10s slide), incremental count aggregation | > 5 tx / 60 s |
+| Geographic impossibility | Per-user `ValueState` holding last location; flags implied travel speed (24h state TTL) | > 900 km/h |
+
+- **Event time and watermarks:** windows use each transaction's own timestamp, with 5s bounded out-of-orderness, so delayed or replayed events land in the correct window.
+- **Speed instead of distance:** unlike the worker's 500 km distance rule, the Flink rule divides distance by elapsed time, so a legitimate NYC→London flight isn't flagged.
+- **Fault tolerance:** checkpoints every 10s snapshot Kafka offsets together with keyed state; on failure, the job restores state and replays from the checkpointed offsets. Alerts are delivered at-least-once.
+
+**Job graph:** `keyBy` hash-partitions the stream by user into both rule operators.
+![Flink Job Graph](Flink_job_graph.png)
+
+**Checkpoints:** offsets and per-user state snapshotted every 10s.
+![Flink Checkpoints](Flink_checkpoints.png)
+
+**Alerts topic:** JSON alerts keyed by `user_id`.
+![Kafka Fraud Alerts](Kafka_fraud_alerts.png)
 
 ## Agentic Threshold Tuner
 
@@ -132,8 +151,9 @@ Prometheus scrapes the worker on `:8001`. Grafana dashboards:
 **Prerequisites:** Docker, Docker Compose, Python 3.11+
 
 ```bash
-# 1. Start infrastructure (Kafka, Redis, Prometheus, Grafana)
-docker compose up -d
+# 1. Start infrastructure (Kafka, Redis, Prometheus, Grafana, Flink)
+#    Flink UI: http://localhost:8081 · Kafka UI: http://localhost:8080
+docker compose up -d --build
 
 # 2. Install dependencies
 pip install -r requirements.txt
