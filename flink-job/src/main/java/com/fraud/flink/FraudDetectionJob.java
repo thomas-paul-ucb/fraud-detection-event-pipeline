@@ -1,5 +1,7 @@
 package com.fraud.flink;
 
+import com.fraud.flink.functions.GeoImpossibilityFunction;
+import com.fraud.flink.model.FraudAlert;
 import com.fraud.flink.model.Transaction;
 import com.fraud.flink.serde.TransactionDeserializer;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
@@ -7,6 +9,8 @@ import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+
+import java.time.Duration;
 
 public class FraudDetectionJob {
 
@@ -26,7 +30,12 @@ public class FraudDetectionJob {
         DataStream<Transaction> transactions = env
                 .fromSource(source, WatermarkStrategy.noWatermarks(), "kafka-transactions");
 
-        transactions.print();
+        DataStream<FraudAlert> geoAlerts = transactions
+                .keyBy(tx -> tx.userId)
+                .process(new GeoImpossibilityFunction(900, 50, Duration.ofHours(24)))
+                .name("geo-impossibility");
+
+        geoAlerts.print();
 
         env.execute("Fraud Detection - Flink Stream Processor");
     }
